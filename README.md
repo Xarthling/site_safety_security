@@ -110,6 +110,12 @@ For the live wall:
 python live.py --labels data/labels.csv --device 0
 ```
 
+The default configuration samples video at 5 FPS for inference. This is intentional:
+the rules use video timestamps, so processing every source frame is unnecessary and
+can make live playback fall far behind on slower hardware. Use `--device 0` after
+`verify_gpu.py` reports CUDA availability. `--speed` changes playback speed, not
+the detector's inference throughput.
+
 The computer must have a current NVIDIA display driver. `verify_gpu.py` must report
 `CUDA available: True` before GPU inference is expected. Use `--device cpu` when
 running without CUDA. The project keeps clips, labels, model weights, databases,

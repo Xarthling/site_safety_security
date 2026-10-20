@@ -5,7 +5,7 @@ paths:
   labels: data/labels.csv
 
 video:
-  target_fps: 50          # frames processed per second of video
+  target_fps: 5           # frames processed per second of video
 
 detector:                    # layer 2: PPE model (a vehicle model gets its own section later)
   weights: weights/ppe.pt
