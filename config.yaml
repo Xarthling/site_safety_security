@@ -7,6 +7,14 @@ paths:
 video:
   target_fps: 5           # frames processed per second of video
 
+preprocess:                  # conservative enhancement before model inference
+  enabled: true
+  denoise_kernel: 3          # Gaussian kernel; 0 disables denoising
+  clahe_clip: 1.5            # local contrast; 0 disables CLAHE
+  clahe_grid: 8
+  sharpen_amount: 0.35       # mild unsharp mask; 0 disables sharpening
+  upscale: 1.0               # set to 1.5 only after measuring speed and recall
+
 detector:                    # layer 2: PPE model (a vehicle model gets its own section later)
   weights: weights/ppe.pt
   conf: 0.25                 # minimum detection confidence

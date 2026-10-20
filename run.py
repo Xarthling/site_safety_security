@@ -25,6 +25,7 @@ from safety import annotate
 from safety.ingest import probe, read_frames
 from safety.perception import Detector, YoloDetector, check_classes
 from safety.plates import PlateReader, plate_for_storage
+from safety.preprocess import PreprocessedDetector, PreprocessConfig
 from safety.rules import FrameResult, Rules
 from safety.storage import add_event, add_vehicle, connect, file_hash, start_run
 from safety.tracking import Tracker
@@ -201,7 +202,7 @@ def build_detector(cfg: dict, device: Optional[str] = None) -> YoloDetector:
     if missing:
         raise SystemExit(f"config.yaml expects classes the PPE model does not have: {missing}. "
                          f"Fix them to match the list above.")
-    return detector
+    return PreprocessedDetector(detector, PreprocessConfig.from_config(cfg))
 
 
 def build_vehicle_models(cfg: dict, jobs: List[Tuple[str, str]], device: Optional[str] = None) -> Optional[VehicleModels]:
@@ -217,7 +218,7 @@ def build_vehicle_models(cfg: dict, jobs: List[Tuple[str, str]], device: Optiona
     reader = PlateReader(gate["plate_detector"], gate["plate_ocr"]) if gate["read_plates"] else None
     print(f"Gate camera '{gate['camera_id']}': vehicles + "
           f"{'licence plates (stored as ' + gate['store_plate'] + ')' if reader else 'classification only'}")
-    return VehicleModels(detector, reader)
+    return VehicleModels(PreprocessedDetector(detector, PreprocessConfig.from_config(cfg)), reader)
 
 
 def main() -> None:

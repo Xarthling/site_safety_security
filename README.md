@@ -116,6 +116,16 @@ can make live playback fall far behind on slower hardware. Use `--device 0` afte
 `verify_gpu.py` reports CUDA availability. `--speed` changes playback speed, not
 the detector's inference throughput.
 
+Frames pass through the separate preprocessing layer in
+[safety/preprocess.py](D:/Site_safety_security/safety/preprocess.py) before PPE and
+vehicle inference. The default settings apply mild Gaussian denoising, CLAHE local
+contrast enhancement, and sharpening. They are configured under `preprocess` in
+[config.yaml](D:/Site_safety_security/config.yaml). To test Lanczos upscaling, set
+`preprocess.upscale` to `1.5`; this increases compute cost, and detections are mapped
+back to the original frame coordinates for correct tracking and annotations. Compare
+precision, recall, false alarms, and inference speed against a baseline before using
+upscaling operationally.
+
 ## Local review dashboard
 
 After at least one run has created `outputs/events.db`, start the local dashboard
