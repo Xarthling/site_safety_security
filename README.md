@@ -116,6 +116,21 @@ can make live playback fall far behind on slower hardware. Use `--device 0` afte
 `verify_gpu.py` reports CUDA availability. `--speed` changes playback speed, not
 the detector's inference throughput.
 
+## Local review dashboard
+
+After at least one run has created `outputs/events.db`, start the local dashboard
+from the repository root:
+
+```powershell
+python dashboard/manage.py runserver 127.0.0.1:8000
+```
+
+Open <http://127.0.0.1:8000/> to review safety-event evidence, mark events as
+confirmed or false positives, and inspect logged vehicles and plates. The dashboard
+reads the existing SQLite tables directly and serves snapshots only from the
+configured `outputs/snapshots` directory. It has no authentication and is intended
+for local use; do not expose this development server to a network.
+
 The computer must have a current NVIDIA display driver. `verify_gpu.py` must report
 `CUDA available: True` before GPU inference is expected. Use `--device cpu` when
 running without CUDA. The project keeps clips, labels, model weights, databases,

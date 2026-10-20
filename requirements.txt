@@ -7,5 +7,4 @@ ultralytics       # perception; AGPL-3.0, see README (not needed to run the test
 fast-alpr        # licence plate detection and reading (gate camera)
 onnxruntime      # runtime required by fast-alpr
 pytest
-# added later:
-# django          # dashboard
+django           # local event-review dashboard

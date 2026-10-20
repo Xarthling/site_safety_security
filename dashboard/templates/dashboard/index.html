@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Worksite safety review</title>
+  <style>
+    :root { color-scheme: light; font: 15px system-ui, sans-serif; }
+    body { margin: 0; background: #f3f5f7; color: #17202a; }
+    header { padding: 1.5rem 2rem; background: #17324d; color: white; }
+    main { max-width: 1400px; margin: 1.5rem auto; padding: 0 1rem; }
+    .cards { display: flex; gap: 1rem; margin-bottom: 1rem; }
+    .card, section { background: white; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px #0002; }
+    .card strong { display: block; font-size: 1.8rem; }
+    form.filters { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    input, select, button { padding: .45rem; border: 1px solid #b8c2cc; border-radius: 4px; }
+    button { cursor: pointer; background: #e8eef4; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; vertical-align: top; padding: .6rem; border-bottom: 1px solid #e1e5e8; }
+    th { background: #f7f9fa; }
+    img { max-width: 180px; max-height: 110px; object-fit: contain; }
+    .review { display: flex; gap: .25rem; flex-wrap: wrap; }
+    .status-confirmed { color: #087443; font-weight: 600; }
+    .status-false_positive { color: #a33b00; font-weight: 600; }
+    .muted { color: #607080; }
+    section { margin-top: 1rem; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <header><h1>Worksite safety review</h1><div>Local event and vehicle evidence</div></header>
+  <main>
+    <div class="cards">
+      <div class="card"><strong>{{ event_count }}</strong>events shown</div>
+      <div class="card"><strong>{{ vehicle_count }}</strong>vehicles shown</div>
+    </div>
+    <form class="filters" method="get">
+      <select name="run_id"><option value="">All runs</option>{% for run in runs %}<option value="{{ run.id }}" {% if selected.run_id == run.id|stringformat:"s" %}selected{% endif %}>Run {{ run.id }}</option>{% endfor %}</select>
+      <input name="camera_id" value="{{ selected.camera_id|default:'' }}" placeholder="Camera">
+      <input name="event_type" value="{{ selected.event_type|default:'' }}" placeholder="Event type">
+      <select name="review_status"><option value="">All review states</option>{% for value in review_statuses %}<option value="{{ value }}" {% if selected.review_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
+      <button type="submit">Filter</button><a href="{% url 'dashboard' %}">Clear</a>
+    </form>
+    <section>
+      <h2>Safety events</h2>
+      <table><thead><tr><th>Evidence</th><th>When</th><th>Event</th><th>Confidence</th><th>Review</th></tr></thead><tbody>
+      {% for event in events %}
+        <tr><td>{% if event.snapshot_name %}<img src="{% url 'snapshot' relative_path=event.snapshot_name %}" alt="Event evidence">{% else %}<span class="muted">No snapshot</span>{% endif %}</td>
+          <td>{{ event.timestamp_utc }}<br><span class="muted">{{ event.camera_id }} / {{ event.clip }} / {{ event.video_time_s }}s</span></td>
+          <td><strong>{{ event.event_type }}</strong><br>Track {{ event.track_id }}</td><td>{{ event.confidence|floatformat:2 }}</td>
+          <td><span class="status-{{ event.review_status }}">{{ event.review_status }}</span>
+            <form class="review" method="post" action="{% url 'review-event' event.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button name="status" value="confirmed">Confirm</button><button name="status" value="false_positive">False positive</button><button name="status" value="unreviewed">Reset</button>
+            </form>
+          </td></tr>
+      {% empty %}<tr><td colspan="5">No matching events.</td></tr>{% endfor %}
+      </tbody></table>
+    </section>
+    <section><h2>Vehicles and plates</h2><table><thead><tr><th>When</th><th>Camera / clip</th><th>Class</th><th>Plate</th><th>Confidence</th></tr></thead><tbody>
+      {% for vehicle in vehicles %}<tr><td>{{ vehicle.timestamp_utc }}</td><td>{{ vehicle.camera_id }} / {{ vehicle.clip }}</td><td>{{ vehicle.vehicle_class }}</td><td>{{ vehicle.plate|default:"not read" }}</td><td>{{ vehicle.class_conf|floatformat:2 }} / {{ vehicle.plate_conf|floatformat:2 }}</td></tr>
+      {% empty %}<tr><td colspan="5">No matching vehicles.</td></tr>{% endfor %}
+    </tbody></table></section>
+  </main>
+</body>
+</html>
