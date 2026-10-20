@@ -1,0 +1,11 @@
+pyyaml
+numpy
+opencv-python       # GUI playback in live.py; use --no-display in headless environments
+supervision
+trackers          # ByteTrack
+ultralytics       # perception; AGPL-3.0, see README (not needed to run the tests)
+fast-alpr        # licence plate detection and reading (gate camera)
+onnxruntime      # runtime required by fast-alpr
+pytest
+# added later:
+# django          # dashboard

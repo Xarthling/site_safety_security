@@ -1,0 +1,48 @@
+# Keep this file small. Add a section for each layer as you build it.
+paths:
+  db: outputs/events.db
+  snapshots: outputs/snapshots
+  labels: data/labels.csv
+
+video:
+  target_fps: 50          # frames processed per second of video
+
+detector:                    # layer 2: PPE model (a vehicle model gets its own section later)
+  weights: weights/ppe.pt
+  conf: 0.25                 # minimum detection confidence
+  imgsz: 960                 # larger helps small helmets on CCTV, costs compute
+  person_class: person       # the class name this model uses for people
+
+tracking:                    # layer 3
+  activation_threshold: 0.4  # detections below this cannot start a new track
+  min_consecutive_frames: 2  # frames an object must be seen before it gets an ID
+
+# Gate camera: vehicle classification + licence plates, for ONE camera only.
+gate:
+  camera_id: gate_cam          # only this camera runs the vehicle monitor (must match labels.csv / --camera-id)
+  vehicle_weights: weights/yolo11n.pt   # general COCO model (download_weights.py fetches it)
+  vehicle_classes: [car, truck, bus, motorcycle]   # class names to keep from that model
+  conf: 0.35
+  imgsz: 960
+  read_plates: true            # false = classify vehicles only
+  plate_detector: yolo-v9-t-384-license-plate-end2end
+  plate_ocr: cct-xs-v2-global-model
+  plate_min_conf: 0.6          # plate reads below this are ignored
+  min_vehicle_width_px: 120    # plates are not read on vehicles narrower than this
+  finalize_after_s: 3.0        # a vehicle is logged this long after it leaves view
+  store_plate: text            # text | hash | none. Plates are personal information.
+  plate_salt: change-me        # mixed into the hash when store_plate is hash
+
+# Layer 4: rules. Class names must match what the model outputs (run.py prints them).
+rules:
+  confirm_seconds: 3.0       # a violation must last this long before an event
+  clear_seconds: 2.0         # no violation for this long ends the episode
+  min_person_height_px: 80   # smaller people are "unknown", never a violation
+  helmet:                    # remove a section to stop checking that item
+    present: [helmet]        # classes meaning "worn"
+    absent: [no-helmet]      # classes meaning "missing" (leave [] to infer from absence)
+    region: [0.0, 0.40]      # band of the person box where the item should be (from the top)
+  vest:
+    present: [vest]
+    absent: [no-vest]
+    region: [0.15, 0.75]

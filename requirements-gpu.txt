@@ -1,0 +1,7 @@
+# Install the NVIDIA-enabled PyTorch build before the application dependencies.
+# CUDA 12.6 wheels support the GTX 1660 Super (compute capability 7.5).
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch
+torchvision
+torchaudio
+-r requirements.txt
