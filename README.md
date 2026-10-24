@@ -156,6 +156,11 @@ for any required readable plate testing.
 
 `config.yaml` is the single config file. It holds the detector weights and class names, processing rate, per-item rules and thresholds, and (as sections inside the same file) each camera's zones. Starting values, to be tuned on real clips:
 
+To define a zone from a clip, run `python define_zone.py --video data/clips/<clip>.mp4`.
+The preview is fitted to the window without cropping; use the left/right arrow keys (or
+`a`/`d`) to choose the frame, then click the zone corners. Changing frames clears any
+corners already drawn.
+
 | Parameter | Start value |
 |---|---|
 | Processing rate | 5 frames per second |

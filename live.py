@@ -4,7 +4,6 @@ with boxes, PPE status and an alert banner when a violation is confirmed.
     python live.py --labels data/labels.csv            # every clip in labels.csv, one tile each
     python live.py --video data/clips/a.mp4 data/clips/b.mp4
     python live.py --labels data/labels.csv --speed 2  # play twice as fast (a quick load test)
-    python live.py --labels data/labels.csv --no-display  # process without an OpenCV GUI
 
 Keys: q = quit, space = pause / resume.
 
@@ -30,7 +29,9 @@ from safety import annotate
 from safety.ingest import probe
 from safety.plates import plate_for_storage
 from safety.storage import connect, file_hash, start_run
+from safety.types import VEHICLE_IN, VEHICLE_OUT
 from safety.vehicles import Finished, VehicleMonitor
+from safety.zones import zones_for
 
 RED, ORANGE = (40, 40, 220), (40, 140, 240)   # banner colours: violation, vehicle logged
 BANNER_SECONDS = 4.0   # how long an alert stays on a tile
@@ -66,10 +67,12 @@ class LiveCamera:
         self.info = probe(path, cfg["video"]["target_fps"])
         self.cap = cv2.VideoCapture(path)
         gate = cfg.get("gate")
+        self.zones = zones_for(cfg, camera_id, self.info.width, self.info.height)
         monitor = None
         if vehicle_models is not None and gate and camera_id == gate["camera_id"]:
-            monitor = VehicleMonitor(vehicle_models.detector, vehicle_models.reader, gate, self.info.sample_fps)
-        self.pipeline = CameraPipeline(self.info.sample_fps, cfg, monitor)
+            monitor = VehicleMonitor(vehicle_models.detector, vehicle_models.reader, gate,
+                                     self.info.sample_fps, self.zones)
+        self.pipeline = CameraPipeline(self.info.sample_fps, cfg, monitor, self.zones)
         self.vehicles, self.vehicle_labels = [], {}   # gate camera only
         self.index = 0                 # next frame number to read from the file
         self.image = None              # latest frame shown
@@ -142,10 +145,11 @@ class LiveWall:
         cam.vehicles, cam.vehicle_labels = out.vehicles, out.vehicle_labels
         cam.last_proc_t = cam.video_t
         cam.n_processed += 1
-        for ev in out.result.events:
+        for ev in out.all_events:
             cam.n_events += 1
-            cam.banner = f"{ev.event_type.upper().replace('_', ' ')}  #{ev.track_id}"
-            cam.banner_until, cam.banner_colour = now + BANNER_SECONDS, RED
+            is_vehicle = ev.event_type in (VEHICLE_IN, VEHICLE_OUT)
+            cam.banner = f"{ev.event_type.upper().replace('_', ' ')}  " + (ev.detail if is_vehicle else f"#{ev.track_id}")
+            cam.banner_until, cam.banner_colour = now + BANNER_SECONDS, ORANGE if is_vehicle else RED
             if self.conn is not None:
                 save_event(self.conn, self.run_id, ev, cam.image, out, cam.camera_id, cam.clip_name,
                            cam.clip_start, self.cfg["paths"]["snapshots"])
@@ -168,7 +172,8 @@ class LiveWall:
             canvas = np.zeros((h, w, 3), dtype=np.uint8)
         else:
             canvas = fit(annotate.draw(cam.image, cam.ppe, cam.tracks, "", cam.statuses,
-                                       vehicles=cam.vehicles, vehicle_labels=cam.vehicle_labels), w, h)
+                                       vehicles=cam.vehicles, vehicle_labels=cam.vehicle_labels,
+                                       zones=cam.zones), w, h)
         cv2.rectangle(canvas, (0, 0), (w, 26), (30, 30, 30), -1)
         header = f"{cam.camera_id}   {cam.video_t:6.1f}s   people {len(cam.tracks)}"
         if cam.pipeline.vehicle_monitor is not None:
@@ -215,25 +220,12 @@ def main() -> None:
     ap.add_argument("--tile-width", type=int, default=640)
     ap.add_argument("--tile-height", type=int, default=360)
     ap.add_argument("--no-save", action="store_true", help="watch only; do not write events")
-    ap.add_argument("--no-display", action="store_true",
-                    help="process clips without opening an OpenCV window (headless mode)")
     ap.add_argument("--notes", default="live wall")
     args = ap.parse_args()
 
     jobs = make_jobs(args.video, args.labels, args.clips_dir, args.camera_id)
     if not jobs:
         raise SystemExit("Nothing to watch: pass --video <files> or --labels data/labels.csv")
-    title = "CCTV wall (q = quit, space = pause)"
-    if not args.no_display:
-        try:
-            cv2.namedWindow(title, cv2.WINDOW_NORMAL)
-            cv2.destroyWindow(title)
-        except cv2.error as exc:
-            raise SystemExit(
-                "Interactive display is unavailable in this OpenCV build. "
-                "Use --no-display, or replace opencv-python-headless with "
-                "opencv-python for windowed playback."
-            ) from exc
     cfg = load_config(args.config)
     detector = build_detector(cfg, args.device)
     vehicle_models = build_vehicle_models(cfg, jobs, args.device)
@@ -248,31 +240,26 @@ def main() -> None:
     wall = LiveWall(jobs, detector, cfg, conn, run_id, clip_start, (args.tile_width, args.tile_height),
                     vehicle_models)
 
+    title = "CCTV wall (q = quit, space = pause)"
+    cv2.namedWindow(title, cv2.WINDOW_NORMAL)
     clock, last, paused, finished_msg = 0.0, time.monotonic(), False, False
     try:
-        if args.no_display:
-            step = 1.0 / max(c.info.fps for c in wall.cameras)
-            while not wall.all_done:
-                wall.step(clock)
-                clock += step
-        else:
-            while True:
-                tick = time.monotonic()
-                if not paused:
-                    clock += (tick - last) * args.speed
-                last = tick
-                cv2.imshow(title, wall.step(clock))
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("q") or cv2.getWindowProperty(title, cv2.WND_PROP_VISIBLE) < 1:
-                    break
-                if key == ord(" "):
-                    paused = not paused
-                if wall.all_done and not finished_msg:
-                    print("All clips finished. Press q to close the window.")
-                    finished_msg = True
+        while True:
+            tick = time.monotonic()
+            if not paused:
+                clock += (tick - last) * args.speed
+            last = tick
+            cv2.imshow(title, wall.step(clock))
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q") or cv2.getWindowProperty(title, cv2.WND_PROP_VISIBLE) < 1:
+                break
+            if key == ord(" "):
+                paused = not paused
+            if wall.all_done and not finished_msg:
+                print("All clips finished. Press q to close the window.")
+                finished_msg = True
     finally:
-        if not args.no_display:
-            cv2.destroyAllWindows()
+        cv2.destroyAllWindows()
         print(f"\nPlayed {clock:.0f}s of footage:")
         print("\n".join(wall.summary(clock)))
         wall.close()

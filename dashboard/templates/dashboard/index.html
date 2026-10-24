@@ -23,6 +23,8 @@
     .status-confirmed { color: #087443; font-weight: 600; }
     .status-false_positive { color: #a33b00; font-weight: 600; }
     .muted { color: #607080; }
+    .detail { max-width: 260px; white-space: pre-wrap; }
+    .stats { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
     section { margin-top: 1rem; overflow-x: auto; }
   </style>
 </head>
@@ -32,32 +34,36 @@
     <div class="cards">
       <div class="card"><strong>{{ event_count }}</strong>events shown</div>
       <div class="card"><strong>{{ vehicle_count }}</strong>vehicles shown</div>
+      <div class="card"><strong>{{ review_counts.unreviewed }}</strong>Unreviewed</div>
+      <div class="card"><strong>{{ review_counts.confirmed }}</strong>Confirmed</div>
+      <div class="card"><strong>{{ review_counts.false_positive }}</strong>False positive</div>
     </div>
     <form class="filters" method="get">
-      <select name="run_id"><option value="">All runs</option>{% for run in runs %}<option value="{{ run.id }}" {% if selected.run_id == run.id|stringformat:"s" %}selected{% endif %}>Run {{ run.id }}</option>{% endfor %}</select>
-      <input name="camera_id" value="{{ selected.camera_id|default:'' }}" placeholder="Camera">
-      <input name="event_type" value="{{ selected.event_type|default:'' }}" placeholder="Event type">
+      <select name="run_id"><option value="">All runs</option>{% for run in runs %}<option value="{{ run.id }}" {% if selected.run_id == run.id|stringformat:"s" %}selected{% endif %}>Run {{ run.id }}{% if run.clips %} ({{ run.clips|join:", " }}){% endif %}</option>{% endfor %}</select>
+      <select name="camera_id"><option value="">All cameras</option>{% for value in cameras %}<option value="{{ value }}" {% if selected.camera_id == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
+      <select name="event_type"><option value="">All event types</option>{% for value in event_types %}<option value="{{ value }}" {% if selected.event_type == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
       <select name="review_status"><option value="">All review states</option>{% for value in review_statuses %}<option value="{{ value }}" {% if selected.review_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
+      <select name="vehicle_class"><option value="">All vehicle classes</option>{% for value in vehicle_classes %}<option value="{{ value }}" {% if selected.vehicle_class == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
       <button type="submit">Filter</button><a href="{% url 'dashboard' %}">Clear</a>
     </form>
     <section>
       <h2>Safety events</h2>
-      <table><thead><tr><th>Evidence</th><th>When</th><th>Event</th><th>Confidence</th><th>Review</th></tr></thead><tbody>
+      <table><thead><tr><th>Evidence</th><th>When</th><th>Event</th><th>Details</th><th>Confidence</th><th>Review</th></tr></thead><tbody>
       {% for event in events %}
         <tr><td>{% if event.snapshot_name %}<img src="{% url 'snapshot' relative_path=event.snapshot_name %}" alt="Event evidence">{% else %}<span class="muted">No snapshot</span>{% endif %}</td>
           <td>{{ event.timestamp_utc }}<br><span class="muted">{{ event.camera_id }} / {{ event.clip }} / {{ event.video_time_s }}s</span></td>
-          <td><strong>{{ event.event_type }}</strong><br>Track {{ event.track_id }}</td><td>{{ event.confidence|floatformat:2 }}</td>
+          <td><strong>{{ event.event_type }}</strong><br>Track {{ event.track_id }}</td><td class="detail">{{ event.detail|default:"-" }}</td><td>{{ event.confidence|floatformat:2 }}</td>
           <td><span class="status-{{ event.review_status }}">{{ event.review_status }}</span>
             <form class="review" method="post" action="{% url 'review-event' event.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
               <button name="status" value="confirmed">Confirm</button><button name="status" value="false_positive">False positive</button><button name="status" value="unreviewed">Reset</button>
             </form>
           </td></tr>
-      {% empty %}<tr><td colspan="5">No matching events.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="6">No matching events.</td></tr>{% endfor %}
       </tbody></table>
     </section>
-    <section><h2>Vehicles and plates</h2><table><thead><tr><th>When</th><th>Camera / clip</th><th>Class</th><th>Plate</th><th>Confidence</th></tr></thead><tbody>
-      {% for vehicle in vehicles %}<tr><td>{{ vehicle.timestamp_utc }}</td><td>{{ vehicle.camera_id }} / {{ vehicle.clip }}</td><td>{{ vehicle.vehicle_class }}</td><td>{{ vehicle.plate|default:"not read" }}</td><td>{{ vehicle.class_conf|floatformat:2 }} / {{ vehicle.plate_conf|floatformat:2 }}</td></tr>
-      {% empty %}<tr><td colspan="5">No matching vehicles.</td></tr>{% endfor %}
+    <section><h2>Vehicles and plates</h2><table><thead><tr><th>Evidence</th><th>First seen</th><th>Last seen</th><th>Camera / clip</th><th>Class</th><th>Plate</th><th>Confidence</th></tr></thead><tbody>
+      {% for vehicle in vehicles %}<tr><td>{% if vehicle.snapshot_name %}<img src="{% url 'snapshot' relative_path=vehicle.snapshot_name %}" alt="Vehicle evidence">{% else %}<span class="muted">No snapshot</span>{% endif %}</td><td>{{ vehicle.timestamp_utc }}<br><span class="muted">{{ vehicle.first_seen_s }}s</span></td><td>{{ vehicle.last_seen_s }}s</td><td>{{ vehicle.camera_id }} / {{ vehicle.clip }}</td><td>{{ vehicle.vehicle_class }}</td><td>{{ vehicle.plate|default:"not read" }}</td><td>{{ vehicle.class_conf|floatformat:2 }} / {{ vehicle.plate_conf|floatformat:2 }}</td></tr>
+      {% empty %}<tr><td colspan="7">No matching vehicles.</td></tr>{% endfor %}
     </tbody></table></section>
   </main>
 </body>

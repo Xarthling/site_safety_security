@@ -31,6 +31,7 @@ from safety.storage import add_event, add_vehicle, connect, file_hash, start_run
 from safety.tracking import Tracker
 from safety.types import Track
 from safety.vehicles import Finished, VehicleMonitor
+from safety.zones import ZoneSet, zones_for
 
 
 def load_config(path: str) -> dict:
@@ -52,27 +53,35 @@ class FrameOutput:
     vehicles: List[Track] = field(default_factory=list)          # tracked vehicles (gate camera only)
     vehicle_labels: Dict[int, str] = field(default_factory=dict) # track_id -> e.g. "car ABC123"
     finished: List[Finished] = field(default_factory=list)       # vehicles logged on this frame
+    vehicle_events: list = field(default_factory=list)
+
+    @property
+    def all_events(self):
+        return self.result.events + self.vehicle_events
 
 
 class CameraPipeline:
     """Everything that keeps state for ONE camera: its tracker, rules timers and, for the gate
     camera, its vehicle monitor. Use one per camera so cameras never mix."""
 
-    def __init__(self, sample_fps: float, cfg: dict, vehicle_monitor: Optional[VehicleMonitor] = None):
+    def __init__(self, sample_fps: float, cfg: dict, vehicle_monitor: Optional[VehicleMonitor] = None,
+                 zones: Optional[ZoneSet] = None):
         t = cfg["tracking"]
         self.person_class = cfg["detector"]["person_class"]
         self.tracker = Tracker("person", sample_fps, t["activation_threshold"], t["min_consecutive_frames"])
         self.rules = Rules.from_config(cfg["rules"])
         self.vehicle_monitor = vehicle_monitor
+        self.zones = zones or ZoneSet()
 
     def process(self, dets, video_time_s: float, image=None) -> FrameOutput:
-        people = [d for d in dets if d.cls == self.person_class]
+        people = [d for d in dets if d.cls == self.person_class and self.zones.in_range(d.box)]
         ppe = [d for d in dets if d.cls != self.person_class]
         tracks = self.tracker.update(people)
         out = FrameOutput(ppe, tracks, self.rules.update(tracks, ppe, video_time_s))
         if self.vehicle_monitor is not None:
             v = self.vehicle_monitor.process(image, video_time_s)
-            out.vehicles, out.vehicle_labels, out.finished = v.tracks, v.labels, v.finished
+            out.vehicles, out.vehicle_labels, out.finished, out.vehicle_events = (
+                v.tracks, v.labels, v.finished, v.events)
         return out
 
     def flush(self, video_time_s: float) -> List[Finished]:
@@ -128,9 +137,10 @@ def run_clip(video: str, detector: Detector, cfg: dict, *, camera_id: str = "cam
     clip_start = clip_start or default_clip_start(video)
     gate = cfg.get("gate")
     monitor = None
+    zones = zones_for(cfg, camera_id, info.width, info.height)
     if vehicle_models is not None and gate and camera_id == gate["camera_id"]:
-        monitor = VehicleMonitor(vehicle_models.detector, vehicle_models.reader, gate, info.sample_fps)
-    camera = CameraPipeline(info.sample_fps, cfg, monitor)
+        monitor = VehicleMonitor(vehicle_models.detector, vehicle_models.reader, gate, info.sample_fps, zones)
+    camera = CameraPipeline(info.sample_fps, cfg, monitor, zones)
 
     writer = None
     if annotated_path:
@@ -161,7 +171,7 @@ def run_clip(video: str, detector: Detector, cfg: dict, *, camera_id: str = "cam
         if writer is not None:
             caption = f"t={frame.video_time_s:6.1f}s  people={len(out.tracks)}"
             writer.write(annotate.draw(frame.image, out.ppe, out.tracks, caption, out.result.statuses,
-                                       vehicles=out.vehicles, vehicle_labels=out.vehicle_labels))
+                                       vehicles=out.vehicles, vehicle_labels=out.vehicle_labels, zones=zones))
         n_frames, last_t = n_frames + 1, frame.video_time_s
     log_vehicles(camera.flush(last_t))
     if writer is not None:

@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS events (
     snapshot_path  TEXT NOT NULL,
     review_status  TEXT NOT NULL DEFAULT 'unreviewed',
     reviewed_at    TEXT,
-    review_notes   TEXT NOT NULL DEFAULT ''
+    review_notes   TEXT NOT NULL DEFAULT '',
+    detail         TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS vehicle_log (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +71,10 @@ def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(events)")}
+    if "detail" not in columns:   # database created before this column existed
+        conn.execute("ALTER TABLE events ADD COLUMN detail TEXT NOT NULL DEFAULT ''")
+        conn.commit()
     return conn
 
 
@@ -105,10 +110,10 @@ def add_event(conn: sqlite3.Connection, run_id: int, event: Event, camera_id: st
     timestamp = (clip_start + timedelta(seconds=event.video_time_s)).astimezone(timezone.utc)
     cur = conn.execute(
         "INSERT INTO events (run_id, event_type, camera_id, clip, video_time_s, timestamp_utc,"
-        " track_id, confidence, bbox_json, snapshot_path) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        " track_id, confidence, bbox_json, snapshot_path, detail) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (run_id, event.event_type, camera_id, clip, round(event.video_time_s, 3),
          timestamp.isoformat(), event.track_id, round(event.confidence, 4),
-         json.dumps([round(v, 1) for v in event.box]), snapshot_path),
+         json.dumps([round(v, 1) for v in event.box]), snapshot_path, event.detail),
     )
     conn.commit()
     return int(cur.lastrowid)

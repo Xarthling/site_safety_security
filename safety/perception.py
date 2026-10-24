@@ -38,7 +38,6 @@ def check_classes(model_names: Sequence[str], wanted: Sequence[str]) -> List[str
 
 
 class YoloDetector:
-    """Ultralytics YOLO model. Note: Ultralytics is AGPL-3.0, see the README licensing section."""
 
     def __init__(self, weights: str, conf: float = 0.25, imgsz: int = 960,
                  device: Optional[str] = None):

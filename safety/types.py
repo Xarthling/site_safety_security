@@ -8,7 +8,8 @@ Box = Tuple[float, float, float, float]  # x1, y1, x2, y2 in pixels
 OK, MISSING, UNKNOWN = "ok", "missing", "unknown"
 
 # Event types written to the database
-NO_HELMET, NO_VEST, VEHICLE_IN_ZONE = "no_helmet", "no_vest", "vehicle_in_zone"
+NO_HELMET, NO_VEST = "no_helmet", "no_vest"
+VEHICLE_IN, VEHICLE_OUT = "vehicle_in", "vehicle_out"   # gate zone entries and exits
 
 
 @dataclass(frozen=True)
@@ -31,11 +32,12 @@ class Track:
 @dataclass(frozen=True)
 class Event:
     """A confirmed violation, produced by the rules layer."""
-    event_type: str      # NO_HELMET, NO_VEST or VEHICLE_IN_ZONE
+    event_type: str      # NO_HELMET, NO_VEST, VEHICLE_IN or VEHICLE_OUT
     track_id: int
     video_time_s: float  # seconds from the start of the clip, when the event was confirmed
     confidence: float
     box: Box
+    detail: str = ""     # extra text, e.g. "car ABC123" for vehicle events
 
 
 @dataclass(frozen=True)

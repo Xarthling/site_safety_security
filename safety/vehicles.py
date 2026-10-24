@@ -8,7 +8,7 @@ leaves view (or at the end of the clip, via flush).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 import cv2
@@ -16,7 +16,8 @@ import numpy as np
 
 from .plates import PlateRead, plate_for_storage
 from .tracking import Tracker
-from .types import Box, Det, Track, VehicleRecord
+from .types import VEHICLE_IN, VEHICLE_OUT, Box, Det, Event, Track, VehicleRecord
+from .zones import InOutMonitor, ZoneSet
 
 CONFIRM_READS = 2   # stop reading once the leading plate has been read this many times
 MAX_ATTEMPTS = 8    # ...or after this many attempts, so a bad view cannot cost compute forever
@@ -35,6 +36,7 @@ class VehicleFrame:
     tracks: List[Track]             # vehicles currently tracked
     labels: Dict[int, str]          # track_id -> text to draw, e.g. "car ABC123"
     finished: List[Finished]        # vehicles that were logged on this frame
+    events: List[Event] = field(default_factory=list)   # gate zone vehicle_in / vehicle_out
 
 
 def iou(a: Box, b: Box) -> float:
@@ -77,8 +79,9 @@ class _State:
 class VehicleMonitor:
     """State for ONE gate camera. The detector and plate reader are shared model objects."""
 
-    def __init__(self, detector, reader, cfg: dict, sample_fps: float):
-        """cfg is the `gate` section of config.yaml. reader may be None (classification only)."""
+    def __init__(self, detector, reader, cfg: dict, sample_fps: float, zones: Optional[ZoneSet] = None):
+        """cfg is the `gate` section of config.yaml. reader may be None (classification only).
+        zones limits the detection range and, if it has a gate polygon, produces in/out events."""
         self.detector, self.reader = detector, reader
         self.classes = set(cfg["vehicle_classes"])
         self.plate_min_conf = cfg["plate_min_conf"]
@@ -87,10 +90,14 @@ class VehicleMonitor:
         self.privacy, self.salt = cfg.get("store_plate", "text"), cfg.get("plate_salt", "")
         self.tracker = Tracker("vehicle", sample_fps)
         self.state: Dict[int, _State] = {}
+        self._current_tracks: List[Track] = []
+        self.zones = zones or ZoneSet()
+        self.gate = (InOutMonitor(self.zones.gate, cfg.get("zone_hold_frames", 2), self.finalize_after_s)
+                     if self.zones.gate else None)
 
     def process(self, image: np.ndarray, t: float) -> VehicleFrame:
-        dets = [d for d in self.detector(image) if d.cls in self.classes]
-        tracks = self.tracker.update(dets)
+        dets = [d for d in self.detector(image) if d.cls in self.classes and self.zones.in_range(d.box)]
+        tracks = self._current_tracks = self.tracker.update(dets)
         for tr in tracks:
             st = self.state.get(tr.track_id)
             if st is None:
@@ -106,7 +113,18 @@ class VehicleMonitor:
             if st.best_read_conf == 0.0 and area > st.crop_area:   # no plate yet: keep the biggest view
                 st.crop, st.crop_area = self._crop(image, tr.box), area
         labels = {tr.track_id: self._label(self.state[tr.track_id]) for tr in tracks}
-        return VehicleFrame(tracks, labels, self._finalize(t, flush=False))
+        events = self._gate_events(t)   # before finalising, so a vehicle's label is still known
+        return VehicleFrame(tracks, labels, self._finalize(t, flush=False), events)
+
+    def _gate_events(self, t: float) -> List[Event]:
+        if self.gate is None:
+            return []
+        events = []
+        for ze in self.gate.update(self._current_tracks, t):
+            st = self.state.get(ze.track_id)
+            events.append(Event(VEHICLE_IN if ze.kind == "in" else VEHICLE_OUT, ze.track_id, ze.time_s,
+                                ze.conf, ze.box, self._label(st) if st else ""))
+        return events
 
     def flush(self, t: float) -> List[Finished]:
         """Log every vehicle still in view (call at the end of a clip)."""
