@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from .types import Event, VehicleRecord
+from .configuration import CameraConfig, CameraSource
 
 REVIEW_STATUSES = ("unreviewed", "confirmed", "false_positive")
 
@@ -61,6 +62,19 @@ CREATE TABLE IF NOT EXISTS vehicle_log (
 CREATE INDEX IF NOT EXISTS idx_vehicle_run ON vehicle_log (run_id);
 CREATE INDEX IF NOT EXISTS idx_events_run ON events (run_id);
 CREATE INDEX IF NOT EXISTS idx_events_type_time ON events (event_type, timestamp_utc);
+CREATE TABLE IF NOT EXISTS camera_configs (
+    camera_id       TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    source_type     TEXT NOT NULL,
+    source_path     TEXT,
+    capabilities_json TEXT NOT NULL,
+    zones_json      TEXT NOT NULL,
+    rules_json      TEXT NOT NULL,
+    vehicle_json    TEXT,
+    revision        INTEGER NOT NULL DEFAULT 1,
+    updated_at      TEXT NOT NULL
+);
 """
 
 
@@ -101,6 +115,61 @@ def start_run(conn: sqlite3.Connection, model_version: str, config_version: str,
 def latest_run_id(conn: sqlite3.Connection) -> Optional[int]:
     row = conn.execute("SELECT MAX(id) AS id FROM runs").fetchone()
     return row["id"]
+
+
+def upsert_camera_config(conn: sqlite3.Connection, camera: CameraConfig) -> int:
+    """Store the latest dashboard-managed camera configuration."""
+    current = conn.execute(
+        "SELECT revision FROM camera_configs WHERE camera_id = ?", (camera.id,)
+    ).fetchone()
+    revision = int(current["revision"]) + 1 if current else 1
+    conn.execute(
+        "INSERT INTO camera_configs "
+        "(camera_id, name, enabled, source_type, source_path, capabilities_json, "
+        "zones_json, rules_json, vehicle_json, revision, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(camera_id) DO UPDATE SET name=excluded.name, enabled=excluded.enabled, "
+        "source_type=excluded.source_type, source_path=excluded.source_path, "
+        "capabilities_json=excluded.capabilities_json, zones_json=excluded.zones_json, "
+        "rules_json=excluded.rules_json, vehicle_json=excluded.vehicle_json, "
+        "revision=excluded.revision, updated_at=excluded.updated_at",
+        (camera.id, camera.name, int(camera.enabled), camera.source.type, camera.source.path,
+         json.dumps(sorted(camera.capabilities)), json.dumps(camera.zones, sort_keys=True),
+         json.dumps(camera.rules, sort_keys=True),
+         json.dumps(camera.vehicle, sort_keys=True) if camera.vehicle is not None else None,
+         revision, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    return revision
+
+
+def list_camera_configs(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    """Return dashboard-managed cameras ordered by name."""
+    return conn.execute("SELECT * FROM camera_configs ORDER BY name, camera_id").fetchall()
+
+
+def get_camera_config(conn: sqlite3.Connection, camera_id: str) -> Optional[CameraConfig]:
+    """Load one dashboard-managed camera, or None when it has not been imported."""
+    row = conn.execute("SELECT * FROM camera_configs WHERE camera_id = ?", (camera_id,)).fetchone()
+    if row is None:
+        return None
+    return CameraConfig(
+        id=row["camera_id"],
+        name=row["name"],
+        enabled=bool(row["enabled"]),
+        source=CameraSource(row["source_type"], row["source_path"]),
+        capabilities=frozenset(json.loads(row["capabilities_json"])),
+        zones=json.loads(row["zones_json"]),
+        rules=json.loads(row["rules_json"]),
+        vehicle=json.loads(row["vehicle_json"]) if row["vehicle_json"] else None,
+    )
+
+
+def import_camera_configs(conn: sqlite3.Connection, cameras: dict[str, CameraConfig]) -> int:
+    """Import normalized YAML cameras without overwriting unchanged data semantics."""
+    for camera in cameras.values():
+        upsert_camera_config(conn, camera)
+    return len(cameras)
 
 
 def add_event(conn: sqlite3.Connection, run_id: int, event: Event, camera_id: str,

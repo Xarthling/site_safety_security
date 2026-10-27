@@ -27,4 +27,5 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 STATIC_URL = "/static/"
 DB_PATH = os.environ.get("SAFETY_DB", str(ROOT_DIR / "outputs" / "events.db"))
+CONFIG_PATH = os.environ.get("SAFETY_CONFIG", str(ROOT_DIR / "config.yaml"))
 SNAPSHOT_ROOT = Path(os.environ.get("SAFETY_SNAPSHOTS", str(ROOT_DIR / "outputs" / "snapshots"))).resolve()

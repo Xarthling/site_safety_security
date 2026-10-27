@@ -49,7 +49,7 @@ Six layers, each talking only to the next through a small data contract, with ev
 
 How violations are decided:
 
-- **Helmet / vest:** a "missing" class (for example `no-helmet`) in the expected body region means missing; the item itself there means ok; neither means unknown. Where a model has no "missing" class, missing can be inferred from absence on a person large enough to judge.
+- **Hardhat / safety vest:** the model's `NO-Hardhat` or `NO-Safety-Vest` class in the expected body region means missing; the corresponding `Hardhat` or `Safety-Vest` class means ok; neither means unknown. Where a model has no "missing" class, missing can be inferred from absence on a person large enough to judge.
 - **Small people:** anyone below a minimum pixel height is *unknown*, never a violation.
 - **Timing:** a violation must persist for a confirmation time, produces one event per episode, and re-arms after a clear time with no violation. All times are video time, so recorded footage behaves repeatably.
 - **Vehicle in zone:** a tracked vehicle inside the camera's zone polygon for the confirmation time produces one event per episode.
@@ -154,7 +154,47 @@ for any required readable plate testing.
 
 ## Configuration
 
-`config.yaml` is the single config file. It holds the detector weights and class names, processing rate, per-item rules and thresholds, and (as sections inside the same file) each camera's zones. Starting values, to be tuned on real clips:
+`config.yaml` is currently the single configuration source. Phase 1 introduces a
+camera-centric normalized configuration used by both `run.py` and `live.py`.
+The existing YAML shape remains supported during migration. Each camera can
+declare its name, enabled state and capabilities (`ppe`, `vehicles`, and
+`licence_plates`); omitted camera entries retain the legacy PPE defaults.
+Vehicle processing and licence-plate reading are enabled only for cameras that
+declare those capabilities. The dashboard/database configuration planned for
+the next phase will replace YAML as the operational source. Camera
+configurations can now be stored in the `camera_configs` SQLite table and
+managed from the dashboard's Cameras page; YAML remains the import/bootstrap
+source during this migration. Camera zones are edited through the dashboard
+video-frame editor: select a recorded source, navigate to a frame, click
+polygon corners, and save normalized coordinates. Server-side polygon
+validation remains enforced.
+The Cameras page also provides add, edit, enable/disable, source-test,
+live/replay, dashboard inference, zone, and rule-configuration actions.
+Dashboard inference uses the existing detector, tracker, rules, zones, event
+storage, and annotation pipeline and streams annotated JPEG frames to the
+browser; it does not require opening the CLI live wall.
+The YAML still holds model settings, processing
+rate, rules and thresholds, and each camera's zones. Starting values are to be
+tuned on real clips.
+
+PPE models are configured as profiles under `detector.models`; set
+`detector.active_model` to switch checkpoints without changing the pipeline.
+Each profile declares its weights, inference settings, person class, and
+expected class list. A profile can also declare model-specific `rules` when
+its class names differ from the global defaults. For example, adding another
+model only requires a new profile and selecting it:
+
+```yaml
+detector:
+  active_model: another_ppe_model
+  models:
+    another_ppe_model:
+      weights: weights/another-best.pt
+      conf: 0.25
+      imgsz: 960
+      person_class: person
+      classes: [person, helmet, vest, no-helmet, no-vest]
+```
 
 To define a zone from a clip, run `python define_zone.py --video data/clips/<clip>.mp4`.
 The preview is fitted to the window without cropping; use the left/right arrow keys (or

@@ -25,6 +25,7 @@ import numpy as np
 
 from run import (CameraPipeline, VehicleModels, build_detector, build_vehicle_models,
                  default_clip_start, load_config, make_jobs, save_event, save_vehicle)
+from run import detector_config
 from safety import annotate
 from safety.ingest import probe
 from safety.plates import plate_for_storage
@@ -32,6 +33,7 @@ from safety.storage import connect, file_hash, start_run
 from safety.types import VEHICLE_IN, VEHICLE_OUT
 from safety.vehicles import Finished, VehicleMonitor
 from safety.zones import zones_for
+from safety.configuration import as_legacy_config, camera_config, validate_config
 
 RED, ORANGE = (40, 40, 220), (40, 140, 240)   # banner colours: violation, vehicle logged
 BANNER_SECONDS = 4.0   # how long an alert stays on a tile
@@ -66,13 +68,18 @@ class LiveCamera:
         self.camera_id, self.clip_name, self.clip_start = camera_id, os.path.basename(path), clip_start
         self.info = probe(path, cfg["video"]["target_fps"])
         self.cap = cv2.VideoCapture(path)
-        gate = cfg.get("gate")
-        self.zones = zones_for(cfg, camera_id, self.info.width, self.info.height)
+        self.camera_config = camera_config(cfg, camera_id)
+        if not self.camera_config.enabled:
+            raise ValueError(f"Camera {camera_id!r} is disabled")
+        camera_cfg = as_legacy_config(cfg, self.camera_config)
+        gate = self.camera_config.vehicle
+        self.zones = zones_for(camera_cfg, camera_id, self.info.width, self.info.height)
         monitor = None
-        if vehicle_models is not None and gate and camera_id == gate["camera_id"]:
+        if vehicle_models is not None and self.camera_config.supports_vehicles and gate:
             monitor = VehicleMonitor(vehicle_models.detector, vehicle_models.reader, gate,
                                      self.info.sample_fps, self.zones)
-        self.pipeline = CameraPipeline(self.info.sample_fps, cfg, monitor, self.zones)
+        self.pipeline = CameraPipeline(self.info.sample_fps, camera_cfg, monitor, self.zones,
+                                       self.camera_config)
         self.vehicles, self.vehicle_labels = [], {}   # gate camera only
         self.index = 0                 # next frame number to read from the file
         self.image = None              # latest frame shown
@@ -140,7 +147,8 @@ class LiveWall:
         self._log_vehicles(cam, cam.pipeline.flush(cam.video_t), now)
 
     def _process(self, cam: LiveCamera, now: float) -> None:
-        out = cam.pipeline.process(self.detector(cam.image), cam.video_t, cam.image)
+        dets = self.detector(cam.image) if cam.camera_config.supports_ppe else []
+        out = cam.pipeline.process(dets, cam.video_t, cam.image)
         cam.ppe, cam.tracks, cam.statuses = out.ppe, out.tracks, out.result.statuses
         cam.vehicles, cam.vehicle_labels = out.vehicles, out.vehicle_labels
         cam.last_proc_t = cam.video_t
@@ -227,13 +235,15 @@ def main() -> None:
     if not jobs:
         raise SystemExit("Nothing to watch: pass --video <files> or --labels data/labels.csv")
     cfg = load_config(args.config)
+    cfg = load_config(args.config, cfg["paths"]["db"])
+    validate_config(cfg)
     detector = build_detector(cfg, args.device)
     vehicle_models = build_vehicle_models(cfg, jobs, args.device)
 
     conn = run_id = None
     if not args.no_save:
         conn = connect(cfg["paths"]["db"])
-        run_id = start_run(conn, file_hash(cfg["detector"]["weights"]), file_hash(args.config),
+        run_id = start_run(conn, file_hash(detector_config(cfg)["weights"]), file_hash(args.config),
                            [os.path.basename(p) for p, _ in jobs], args.notes)
         print(f"Run {run_id}: events are being saved")
     clip_start = datetime.fromisoformat(args.clip_start) if args.clip_start else None

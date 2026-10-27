@@ -1,0 +1,4 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Test camera source</title>
+<style>body{margin:2rem;background:#f3f5f7;color:#17202a;font:15px system-ui,sans-serif}main{max-width:700px;margin:auto}section{background:#fff;padding:1rem;border-radius:8px}.ok{color:#087443}.bad{color:#8d1d00}</style></head>
+<body><main><p><a href="{% url 'cameras' %}">Back to cameras</a> · <a href="{% url 'camera-edit' camera.id %}">Edit camera</a></p><h1>Test source: {{ camera.name }}</h1><section><p class="{% if result.ok %}ok{% else %}bad{% endif %}">{{ result.message }}</p></section></main></body></html>

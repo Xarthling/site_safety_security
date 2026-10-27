@@ -141,7 +141,11 @@ def test_rules_are_built_from_the_config_file():
     cfg = yaml.safe_load(open("config.yaml"))["rules"]
     r = Rules.from_config(cfg)
     assert [i.name for i in r.items] == ["helmet", "vest"]
-    assert r.items[0].absent == ("no-helmet",) and r.items[1].region == (0.15, 0.75)
+    assert r.items[0].present == ("Hardhat",)
+    assert r.items[0].absent == ("NO-Hardhat",)
+    assert r.items[1].present == ("Safety-Vest",)
+    assert r.items[1].absent == ("NO-Safety-Vest",)
+    assert r.items[1].region == (0.15, 0.75)
     assert r.timer.confirm_s == 3.0 and r.min_height == 80
     del cfg["vest"]
     assert [i.name for i in Rules.from_config(cfg).items] == ["helmet"]

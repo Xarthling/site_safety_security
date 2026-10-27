@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live inference — {{ camera.name }}</title>
+  <style>
+    body { margin: 2rem; background: #f3f5f7; color: #17202a; font: 15px system-ui, sans-serif; }
+    main { max-width: 1100px; margin: auto; }
+    section { background: white; padding: 1rem; border-radius: 8px; }
+    img { display: block; width: 100%; max-width: 960px; background: #000; }
+    .warn { color: #8d1d00; background: #fee; padding: .7rem; }
+    button, a { margin-right: .5rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="{% url 'cameras' %}">Back to cameras</a> · <a href="{% url 'camera-edit' camera.id %}">Edit camera</a></p>
+    <h1>Live inference: {{ camera.name }}</h1>
+    <section>
+      {% if source_ready %}
+        <p>Inference is running in the dashboard. Close this page or press Stop to end the stream.</p>
+        <img id="inference-stream" src="{% url 'camera-stream' camera.id %}" alt="Live annotated inference stream">
+        <button type="button" id="stop-stream">Stop inference</button>
+        <p id="stream-status">Connecting to inference stream...</p>
+      {% else %}
+        <p class="warn">This camera must be enabled and have a readable recorded source.</p>
+        <p><a href="{% url 'camera-test' camera.id %}">Test source</a></p>
+      {% endif %}
+    </section>
+  </main>
+  {% if source_ready %}
+  <script>
+    const stream = document.getElementById("inference-stream");
+    const status = document.getElementById("stream-status");
+    document.getElementById("stop-stream").addEventListener("click", () => {
+      stream.src = "";
+      status.textContent = "Inference stopped.";
+    });
+    stream.addEventListener("load", () => { status.textContent = "Inference stream connected."; });
+    stream.addEventListener("error", () => { status.textContent = "Inference stream ended or failed."; });
+  </script>
+  {% endif %}
+</body>
+</html>

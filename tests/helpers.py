@@ -14,7 +14,7 @@ def make_video(path, fps=10, seconds=3, size=(320, 240)):
 
 class SixPeopleDetector:
     """The labelled scene: 3 fully kitted, 1 vest but no helmet, 2 with neither."""
-    names = ["person", "helmet", "no-helmet", "vest", "no-vest"]
+    names = ["Person", "Hardhat", "NO-Hardhat", "Safety-Vest", "NO-Safety-Vest"]
 
     def __init__(self):
         self.calls = 0
@@ -24,10 +24,10 @@ class SixPeopleDetector:
         dets = []
         for i in range(6):
             x = 20.0 + 100 * i
-            dets.append(Det("person", 0.9, (x, 100.0, x + 60, 300.0)))
+            dets.append(Det("Person", 0.9, (x, 100.0, x + 60, 300.0)))
             head, torso = (x + 10, 102.0, x + 50, 140.0), (x + 5, 150.0, x + 55, 230.0)
-            dets.append(Det("helmet" if i < 3 else "no-helmet", 0.85, head))
-            dets.append(Det("vest" if i < 4 else "no-vest", 0.85, torso))
+            dets.append(Det("Hardhat" if i < 3 else "NO-Hardhat", 0.85, head))
+            dets.append(Det("Safety-Vest" if i < 4 else "NO-Safety-Vest", 0.85, torso))
         return dets
 
 

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edit camera</title>
+  <style>
+    body { margin: 2rem; background: #f3f5f7; color: #17202a; font: 15px system-ui, sans-serif; }
+    main { max-width: 900px; margin: auto; }
+    section { background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 4px #0002; }
+    label { display: block; margin: .8rem 0; font-weight: 600; }
+    input, select, textarea { box-sizing: border-box; display: block; width: 100%; max-width: 700px; margin-top: .3rem; padding: .45rem; border: 1px solid #b8c2cc; border-radius: 4px; font: inherit; }
+    textarea { min-height: 120px; font-family: ui-monospace, monospace; }
+    button { padding: .5rem 1rem; }
+    .error { padding: .7rem; color: #8d1d00; background: #fee; }
+    .hint { color: #607080; font-weight: normal; }
+    .zone-list { margin: .5rem 0 1rem; padding-left: 1.2rem; }
+    .zone-preview { max-width: 100%; overflow: auto; background: #17202a; padding: .5rem; }
+    .zone-stage { position: relative; display: inline-block; line-height: 0; max-width: 100%; }
+    .zone-stage img { display: block; max-width: 100%; height: auto; }
+    .zone-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+    .zone-controls { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; }
+    .zone-controls label { margin: .4rem 0; }
+    .zone-controls input { width: 9rem; }
+    .zone-error { color: #8d1d00; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="{% url 'cameras' %}">Back to cameras</a> · <a href="{% url 'camera-rules' camera.id %}">Configure rules</a> · <a href="{% url 'camera-test' camera.id %}">Test source</a> · <a href="{% url 'camera-replay' camera.id %}">Live/replay</a></p>
+    <h1>Edit {{ camera.name }}</h1>
+    <section>
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+      <form method="post">
+        {% csrf_token %}
+        <label>Name<input name="name" value="{{ camera.name }}"></label>
+        <label><input type="checkbox" name="enabled" {% if camera.enabled %}checked{% endif %}> Enabled</label>
+        <label>Source type<select name="source_type"><option value="recorded" {% if camera.source.type == "recorded" %}selected{% endif %}>Recorded file</option><option value="rtsp" {% if camera.source.type == "rtsp" %}selected{% endif %}>RTSP</option></select></label>
+        <label>Source path or URI<input name="source_path" value="{{ camera.source.path|default:'' }}"></label>
+        <label>Capabilities <span class="hint">comma-separated: ppe, vehicles, licence_plates</span><input name="capabilities" value="{{ capabilities }}"></label>
+        <label>Rules JSON<textarea name="rules">{{ rules }}</textarea></label>
+        <label>Vehicle configuration JSON <span class="hint">required for vehicle capabilities</span><textarea name="vehicle">{{ vehicle }}</textarea></label>
+        <button type="submit">Save camera</button>
+      </form>
+    </section>
+    <section>
+      <h2>Zones</h2>
+      <p class="hint">Click the video preview to add corners in order. Use Undo or Clear to correct the polygon, then save it.</p>
+      <ul class="zone-list">
+        {% for name in zone_names %}
+          <li>{{ name }}{% if name in camera.zones %} — configured{% else %} — not configured{% endif %}</li>
+        {% endfor %}
+      </ul>
+      <div class="zone-controls">
+        <label>Zone<select id="zone-select" name="zone_name">
+          {% for name in zone_names %}<option value="{{ name }}" {% if selected_zone == name %}selected{% endif %}>{{ name }}</option>{% endfor %}
+        </select></label>
+        <label>Time (seconds)<input id="frame-time" type="number" min="0" step="0.1" value="0"></label>
+        <button type="button" id="previous-frame">Previous frame</button>
+        <button type="button" id="next-frame">Next frame</button>
+        <button type="button" id="undo-point">Undo point</button>
+        <button type="button" id="clear-points">Clear points</button>
+      </div>
+      <div class="zone-preview">
+        <div class="zone-stage">
+          {% if has_recorded_source %}
+            <img id="zone-frame" src="{% url 'camera-frame' camera.id %}?time=0" alt="Camera frame for zone definition">
+          {% else %}
+            <p class="hint">Assign a recorded video source above and save the camera before defining a zone.</p>
+            <img id="zone-frame" hidden alt="">
+          {% endif %}
+          <canvas id="zone-canvas"></canvas>
+        </div>
+      </div>
+      <p id="zone-error" class="zone-error" role="alert"></p>
+      <form method="post" id="zone-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save_zone">
+        <input type="hidden" name="zone_name" id="zone-name" value="{{ selected_zone }}">
+        <input type="hidden" name="points" id="zone-points">
+        <button type="submit">Save zone</button>
+      </form>
+      <form method="post" style="margin-top:.7rem">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="delete_zone">
+        <input type="hidden" name="zone_name" value="{{ selected_zone }}">
+        <button type="submit">Delete selected zone</button>
+      </form>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const image = document.getElementById("zone-frame");
+      const canvas = document.getElementById("zone-canvas");
+      const context = canvas.getContext("2d");
+      const points = [];
+      const timeInput = document.getElementById("frame-time");
+      const error = document.getElementById("zone-error");
+      const selectedZone = document.getElementById("zone-select");
+      const zoneName = document.getElementById("zone-name");
+      const pointsInput = document.getElementById("zone-points");
+      const existing = {{ zone_points_json|default:"[]"|safe }};
+
+      function resizeCanvas() {
+        canvas.width = image.clientWidth;
+        canvas.height = image.clientHeight;
+        draw();
+      }
+      function draw() {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        if (!points.length) return;
+        context.strokeStyle = "#dc00dc";
+        context.fillStyle = "#00e5ff";
+        context.lineWidth = 2;
+        context.beginPath();
+        points.forEach((point, index) => {
+          const x = point[0] * canvas.width, y = point[1] * canvas.height;
+          if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+          context.fillRect(x - 4, y - 4, 8, 8);
+        });
+        if (points.length >= 3) context.closePath();
+        context.stroke();
+        if (points.length >= 3) {
+          context.fillStyle = "rgba(220, 0, 220, .18)";
+          context.fill();
+        }
+      }
+      function loadFrame() {
+        const time = Math.max(0, Number(timeInput.value) || 0);
+        image.src = "{% url 'camera-frame' camera.id %}?time=" + encodeURIComponent(time) + "&cache=" + Date.now();
+        points.length = 0;
+        draw();
+      }
+      try {
+        JSON.parse(JSON.stringify(existing)).forEach(point => points.push([Number(point[0]), Number(point[1])]));
+      } catch (ignored) {
+        error.textContent = "The saved zone could not be loaded into the editor.";
+      }
+      canvas.addEventListener("click", event => {
+        if (!image.naturalWidth) return;
+        const rect = canvas.getBoundingClientRect();
+        points.push([
+          Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+          Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+        ]);
+        error.textContent = "";
+        draw();
+      });
+      image.addEventListener("load", resizeCanvas);
+      window.addEventListener("resize", resizeCanvas);
+      document.getElementById("previous-frame").addEventListener("click", () => {
+        timeInput.value = Math.max(0, (Number(timeInput.value) || 0) - 1).toFixed(1);
+        loadFrame();
+      });
+      document.getElementById("next-frame").addEventListener("click", () => {
+        timeInput.value = ((Number(timeInput.value) || 0) + 1).toFixed(1);
+        loadFrame();
+      });
+      document.getElementById("undo-point").addEventListener("click", () => { points.pop(); draw(); });
+      document.getElementById("clear-points").addEventListener("click", () => { points.length = 0; draw(); });
+      timeInput.addEventListener("change", loadFrame);
+      selectedZone.addEventListener("change", () => { zoneName.value = selectedZone.value; loadFrame(); });
+      document.getElementById("zone-form").addEventListener("submit", event => {
+        if (points.length < 3) {
+          event.preventDefault();
+          error.textContent = "A zone needs at least three corners.";
+          return;
+        }
+        pointsInput.value = points.map(point => point[0].toFixed(6) + "," + point[1].toFixed(6)).join("\n");
+      });
+      resizeCanvas();
+    })();
+  </script>
+</body>
+</html>

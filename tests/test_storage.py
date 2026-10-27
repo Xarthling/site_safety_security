@@ -3,7 +3,10 @@ from datetime import datetime, timezone
 import pytest
 
 from safety.storage import add_event, connect, latest_run_id, list_events, set_review, start_run
-from safety.types import NO_HELMET, NO_VEST, Event
+from safety.storage import get_camera_config, list_camera_configs, upsert_camera_config
+from safety.types import Event
+from safety.configuration import CameraConfig, CameraSource
+from safety.types import NO_HELMET, NO_VEST
 
 START = datetime(2026, 10, 19, 8, 30, tzinfo=timezone.utc)
 
@@ -54,3 +57,23 @@ def test_naive_clip_start_is_rejected(tmp_path):
     run_id = start_run(conn, "m", "c", [])
     with pytest.raises(ValueError):
         add_event(conn, run_id, make_event(), "cam1", "a.mp4", datetime(2026, 10, 19, 8, 30), "s.jpg")
+
+
+def test_camera_config_round_trip_and_revision(tmp_path):
+    conn = connect(str(tmp_path / "e.db"))
+    camera = CameraConfig(
+        id="gate_cam",
+        name="Main gate",
+        enabled=True,
+        source=CameraSource("recorded", "clips/gate.mp4"),
+        capabilities=frozenset({"ppe", "vehicles", "licence_plates"}),
+        zones={"detection_zone": [[0.0, 0.0], [1.0, 1.0]]},
+        rules={"confirm_seconds": 3.0},
+        vehicle={"read_plates": True, "store_plate": "text"},
+    )
+
+    assert upsert_camera_config(conn, camera) == 1
+    loaded = get_camera_config(conn, "gate_cam")
+    assert loaded == camera
+    assert upsert_camera_config(conn, camera) == 2
+    assert len(list_camera_configs(conn)) == 1

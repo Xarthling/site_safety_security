@@ -7,11 +7,38 @@ paths:
 video:
   target_fps: 5              # frames processed per second of video
 
-detector:                    # layer 2: PPE model (a vehicle model gets its own section later)
-  weights: weights/ppe.pt
-  conf: 0.25                 # minimum detection confidence
-  imgsz: 960                 # larger helps small helmets on CCTV, costs compute
-  person_class: person       # the class name this model uses for people
+preprocess:                  # conservative enhancement before model inference
+  enabled: true
+  denoise_kernel: 3          # Gaussian kernel; 0 disables denoising
+  clahe_clip: 1.5            # local contrast; 0 disables CLAHE
+  clahe_grid: 8
+  sharpen_amount: 0.35       # mild unsharp mask; 0 disables sharpening
+  upscale: 1.0               # set to 1.5 only after measuring speed and recall
+
+detector:                    # layer 2: select a PPE model profile
+  active_model: ppe
+  models:
+    yolo11m_ppe:
+      weights: weights/yolo11m-best.pt
+      conf: 0.25             # minimum detection confidence
+      imgsz: 960             # larger helps small helmets on CCTV, costs compute
+      person_class: Person
+      classes: [Person, Hardhat, Safety-Vest, NO-Hardhat, NO-Safety-Vest]
+    ppe:
+        weights: weights/ppe.pt
+        conf: 0.25             # minimum detection confidence
+        imgsz: 960             # larger helps small helmets on CCTV, costs compute
+        person_class: person
+        classes: [helmet, no-helmet, no-vest, person, vest]
+        rules:
+          helmet:
+            present: [helmet]
+            absent: [no-helmet]
+            region: [0.0, 0.40]
+          vest:
+            present: [vest]
+            absent: [no-vest]
+            region: [0.15, 0.75]
 
 tracking:                    # layer 3
   activation_threshold: 0.4  # detections below this cannot start a new track
@@ -22,10 +49,16 @@ tracking:                    # layer 3
 # A camera that is not listed here uses the whole frame.
 cameras:
   gate_cam:
+    name: Main gate
+    enabled: true
+    capabilities: [ppe, vehicles, licence_plates]
     gate_zone: [[0.064, 0.529], [0.173, 0.918], [0.271, 0.915], [0.129, 0.537]]
     detection_zone: [[0.106, 0.512], [0.412, 0.906], [0.995, 0.906], [0.993, 0.493]]
-  # site_cam:
-  #   detection_zone: [[0.0, 0.3], [1.0, 0.3], [1.0, 1.0], [0.0, 1.0]]
+  site_cam:
+    name: Main site
+    enabled: true
+    capabilities: [ppe]
+    detection_zone: [[0.0, 0.3], [1.0, 0.3], [1.0, 1.0], [0.0, 1.0]]
 
 # Gate camera: vehicle classification + licence plates, for ONE camera only.
 gate:
@@ -50,10 +83,10 @@ rules:
   clear_seconds: 2.0         # no violation for this long ends the episode
   min_person_height_px: 80   # smaller people are "unknown", never a violation
   helmet:                    # remove a section to stop checking that item
-    present: [helmet]        # classes meaning "worn"
-    absent: [no-helmet]      # classes meaning "missing" (leave [] to infer from absence)
+    present: [Hardhat]       # classes meaning "worn"
+    absent: [NO-Hardhat]     # classes meaning "missing" (leave [] to infer from absence)
     region: [0.0, 0.40]      # band of the person box where the item should be (from the top)
   vest:
-    present: [vest]
-    absent: [no-vest]
+    present: [Safety-Vest]
+    absent: [NO-Safety-Vest]
     region: [0.15, 0.75]

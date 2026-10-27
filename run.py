@@ -32,11 +32,63 @@ from safety.tracking import Tracker
 from safety.types import Track
 from safety.vehicles import Finished, VehicleMonitor
 from safety.zones import ZoneSet, zones_for
+from safety.configuration import (CameraConfig, as_legacy_config, camera_config,
+                                  validate_config)
 
 
-def load_config(path: str) -> dict:
+def detector_config(cfg: dict) -> dict:
+    """Return the selected PPE model settings.
+
+    A profile contains model-specific weights and class names. The legacy flat
+    ``detector`` shape remains supported so older configurations keep working.
+    """
+    detector = cfg["detector"]
+    profiles = detector.get("models")
+    if not profiles:
+        return detector
+    active = detector.get("active_model")
+    if not active or active not in profiles:
+        raise ValueError(
+            "detector.active_model must name one of detector.models"
+        )
+    selected = dict(profiles[active])
+    selected["model_name"] = active
+    return selected
+
+
+def activate_detector_rules(cfg: dict) -> dict:
+    """Apply optional model-specific PPE class mappings to a config copy."""
+    selected = detector_config(cfg)
+    if "rules" not in selected:
+        return cfg
+    output = dict(cfg)
+    output["rules"] = {**cfg.get("rules", {}), **selected["rules"]}
+    return output
+
+
+def load_config(path: str, db_path: Optional[str] = None) -> dict:
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    cfg = activate_detector_rules(cfg)
+    if db_path:
+        from safety.storage import list_camera_configs, connect
+        conn = connect(db_path)
+        try:
+            for row in list_camera_configs(conn):
+                spec = cfg.setdefault("cameras", {}).setdefault(row["camera_id"], {})
+                spec.update({
+                    "name": row["name"],
+                    "enabled": bool(row["enabled"]),
+                    "source": {"type": row["source_type"], "path": row["source_path"]},
+                    "capabilities": yaml.safe_load(row["capabilities_json"]),
+                    "zones": yaml.safe_load(row["zones_json"]),
+                    "rules": yaml.safe_load(row["rules_json"]),
+                })
+                if row["vehicle_json"]:
+                    spec["vehicle"] = yaml.safe_load(row["vehicle_json"])
+        finally:
+            conn.close()
+    return cfg
 
 
 class VehicleModels(NamedTuple):
@@ -65,17 +117,19 @@ class CameraPipeline:
     camera, its vehicle monitor. Use one per camera so cameras never mix."""
 
     def __init__(self, sample_fps: float, cfg: dict, vehicle_monitor: Optional[VehicleMonitor] = None,
-                 zones: Optional[ZoneSet] = None):
+                 zones: Optional[ZoneSet] = None, camera: Optional[CameraConfig] = None):
         t = cfg["tracking"]
-        self.person_class = cfg["detector"]["person_class"]
+        self.person_class = detector_config(cfg)["person_class"]
+        self.ppe_enabled = camera is None or camera.supports_ppe
         self.tracker = Tracker("person", sample_fps, t["activation_threshold"], t["min_consecutive_frames"])
-        self.rules = Rules.from_config(cfg["rules"])
+        self.rules = Rules.from_config(camera.rules if camera else cfg["rules"])
         self.vehicle_monitor = vehicle_monitor
         self.zones = zones or ZoneSet()
 
     def process(self, dets, video_time_s: float, image=None) -> FrameOutput:
-        people = [d for d in dets if d.cls == self.person_class and self.zones.in_range(d.box)]
-        ppe = [d for d in dets if d.cls != self.person_class]
+        people = [d for d in dets if self.ppe_enabled and d.cls == self.person_class
+                  and self.zones.in_range(d.box)]
+        ppe = [d for d in dets if self.ppe_enabled and d.cls != self.person_class]
         tracks = self.tracker.update(people)
         out = FrameOutput(ppe, tracks, self.rules.update(tracks, ppe, video_time_s))
         if self.vehicle_monitor is not None:
@@ -135,12 +189,16 @@ def run_clip(video: str, detector: Detector, cfg: dict, *, camera_id: str = "cam
     info = probe(video, target_fps)
     clip_name = os.path.basename(video)
     clip_start = clip_start or default_clip_start(video)
-    gate = cfg.get("gate")
+    camera = camera_config(cfg, camera_id)
+    if not camera.enabled:
+        raise ValueError(f"Camera {camera_id!r} is disabled")
+    camera_cfg = as_legacy_config(cfg, camera)
+    gate = camera.vehicle
     monitor = None
-    zones = zones_for(cfg, camera_id, info.width, info.height)
-    if vehicle_models is not None and gate and camera_id == gate["camera_id"]:
+    zones = zones_for(camera_cfg, camera_id, info.width, info.height)
+    if vehicle_models is not None and camera.supports_vehicles and gate:
         monitor = VehicleMonitor(vehicle_models.detector, vehicle_models.reader, gate, info.sample_fps, zones)
-    camera = CameraPipeline(info.sample_fps, cfg, monitor, zones)
+    camera_pipeline = CameraPipeline(info.sample_fps, camera_cfg, monitor, zones, camera)
 
     writer = None
     if annotated_path:
@@ -159,7 +217,8 @@ def run_clip(video: str, detector: Detector, cfg: dict, *, camera_id: str = "cam
                 save_vehicle(conn, run_id, fin, camera_id, clip_name, clip_start, cfg["paths"]["snapshots"], gate)
 
     for frame in read_frames(video, target_fps, max_frames):
-        out = camera.process(detector(frame.image), frame.video_time_s, frame.image)
+        dets = detector(frame.image) if camera.supports_ppe else []
+        out = camera_pipeline.process(dets, frame.video_time_s, frame.image)
         for t in out.tracks:
             frames_seen[t.track_id] += 1
         for ev in out.result.events:
@@ -173,7 +232,7 @@ def run_clip(video: str, detector: Detector, cfg: dict, *, camera_id: str = "cam
             writer.write(annotate.draw(frame.image, out.ppe, out.tracks, caption, out.result.statuses,
                                        vehicles=out.vehicles, vehicle_labels=out.vehicle_labels, zones=zones))
         n_frames, last_t = n_frames + 1, frame.video_time_s
-    log_vehicles(camera.flush(last_t))
+    log_vehicles(camera_pipeline.flush(last_t))
     if writer is not None:
         writer.release()
 
@@ -202,13 +261,19 @@ def make_jobs(videos: List[str], labels: Optional[str], clips_dir: str, camera_i
 
 
 def build_detector(cfg: dict, device: Optional[str] = None) -> YoloDetector:
-    """Load the PPE model and check that every class name in config.yaml exists in it."""
-    d, r = cfg["detector"], cfg["rules"]
+    """Load the selected PPE profile and check all configured classes."""
+    d = detector_config(cfg)
+    rule_configs = [camera.rules for camera in validate_config(cfg).values()]
+    if not rule_configs:
+        rule_configs = [cfg["rules"]]
     detector = YoloDetector(d["weights"], d["conf"], d["imgsz"], device)
     print("PPE model classes:", detector.names)
-    wanted = [d["person_class"]] + [c for k in ("helmet", "vest") if k in r
-                                    for c in r[k]["present"] + r[k].get("absent", [])]
-    missing = check_classes(detector.names, wanted)
+    wanted = [d["person_class"]] + [
+        c for rules in rule_configs for k in ("helmet", "vest") if k in rules
+        for c in rules[k]["present"] + rules[k].get("absent", [])
+    ]
+    expected = d.get("classes", wanted)
+    missing = check_classes(detector.names, expected)
     if missing:
         raise SystemExit(f"config.yaml expects classes the PPE model does not have: {missing}. "
                          f"Fix them to match the list above.")
@@ -216,10 +281,16 @@ def build_detector(cfg: dict, device: Optional[str] = None) -> YoloDetector:
 
 
 def build_vehicle_models(cfg: dict, jobs: List[Tuple[str, str]], device: Optional[str] = None) -> Optional[VehicleModels]:
-    """Load the vehicle model and plate reader, but only if some clip belongs to the gate camera."""
-    gate = cfg.get("gate")
-    if not gate or not any(cam == gate["camera_id"] for _, cam in jobs):
+    """Load vehicle models when an assigned camera declares vehicle processing."""
+    assigned = {cam for _, cam in jobs}
+    vehicle_configs = []
+    for camera_id in assigned:
+        camera = camera_config(cfg, camera_id)
+        if camera.supports_vehicles and camera.vehicle:
+            vehicle_configs.append(camera.vehicle)
+    if not vehicle_configs:
         return None
+    gate = vehicle_configs[0]
     detector = YoloDetector(gate["vehicle_weights"], gate["conf"], gate["imgsz"], device)
     print("Vehicle model classes:", detector.names)
     missing = check_classes(detector.names, gate["vehicle_classes"])
@@ -250,12 +321,14 @@ def main() -> None:
         raise SystemExit("Nothing to do: pass --video <file> or --labels data/labels.csv")
 
     cfg = load_config(args.config)
+    cfg = load_config(args.config, cfg["paths"]["db"])
+    validate_config(cfg)
     detector = build_detector(cfg, args.device)
     vehicle_models = build_vehicle_models(cfg, jobs, args.device)
 
     clip_start = datetime.fromisoformat(args.clip_start) if args.clip_start else None
     conn = connect(cfg["paths"]["db"])
-    run_id = start_run(conn, file_hash(cfg["detector"]["weights"]), file_hash(args.config),
+    run_id = start_run(conn, file_hash(detector_config(cfg)["weights"]), file_hash(args.config),
                        [os.path.basename(p) for p, _ in jobs], args.notes)
     print(f"Run {run_id}: {len(jobs)} clip(s)")
 

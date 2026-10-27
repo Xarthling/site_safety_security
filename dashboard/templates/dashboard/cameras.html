@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cameras</title>
+  <style>
+    body { margin: 2rem; background: #f3f5f7; color: #17202a; font: 15px system-ui, sans-serif; }
+    main { max-width: 1100px; margin: auto; }
+    section { background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 4px #0002; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: .65rem; border-bottom: 1px solid #e1e5e8; }
+    th { background: #f7f9fa; }
+    a { color: #075a9c; }
+    .disabled { color: #a33b00; }
+    .actions { display: flex; gap: .35rem; flex-wrap: wrap; }
+    .actions form { display: inline; }
+    button { padding: .35rem .55rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="{% url 'dashboard' %}">Event review</a></p>
+    <h1>Cameras</h1>
+    <p><a href="{% url 'camera-add' %}">Add camera</a></p>
+    <section>
+      <table>
+        <thead><tr><th>Name</th><th>ID</th><th>Source</th><th>Capabilities</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for camera in cameras %}
+          <tr>
+            <td>{{ camera.name }}</td><td>{{ camera.camera_id }}</td>
+            <td>{{ camera.source_type }}{% if camera.source_path %}<br>{{ camera.source_path }}{% endif %}</td>
+            <td>{{ camera.capabilities }}</td>
+            <td>{% if camera.enabled %}Enabled{% else %}<span class="disabled">Disabled</span>{% endif %}</td>
+            <td class="actions">
+              <a href="{% url 'camera-edit' camera.camera_id %}">Edit</a>
+              <a href="{% url 'camera-test' camera.camera_id %}">Test source</a>
+              <a href="{% url 'camera-replay' camera.camera_id %}">Live/replay</a>
+              <a href="{% url 'camera-live' camera.camera_id %}">Run inference</a>
+              <a href="{% url 'camera-edit' camera.camera_id %}?zone=detection_zone">Zones</a>
+              <a href="{% url 'camera-rules' camera.camera_id %}">Rules</a>
+              <form method="post" action="{% url 'camera-toggle' camera.camera_id %}">
+                {% csrf_token %}<button type="submit">{% if camera.enabled %}Disable{% else %}Enable{% endif %}</button>
+              </form>
+            </td>
+          </tr>
+        {% empty %}<tr><td colspan="6">No cameras configured.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

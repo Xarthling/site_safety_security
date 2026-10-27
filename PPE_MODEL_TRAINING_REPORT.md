@@ -19,11 +19,11 @@ The model interface and configuration expect:
 
 | Class | Meaning |
 |---|---|
-| `person` | Worker/person bounding box |
-| `helmet` | Helmet visibly worn |
-| `no-helmet` | Helmet absent or visibly missing |
-| `vest` | Hi-vis vest visibly worn |
-| `no-vest` | Hi-vis vest absent or visibly missing |
+| `Person` | Worker/person bounding box |
+| `Hardhat` | Hardhat visibly worn |
+| `NO-Hardhat` | Hardhat absent or visibly missing |
+| `Safety-Vest` | Hi-vis vest visibly worn |
+| `NO-Safety-Vest` | Hi-vis vest absent or visibly missing |
 
 Recommended labeling policy:
 
@@ -337,3 +337,9 @@ built around diverse site footage, carefully reviewed bounding boxes, clip-level
 splits, and event-level acceptance tests. A realistic successful outcome is a
 meaningful reduction in false alarms and improved recall on the project’s
 cameras—not a guarantee of universal PPE compliance detection.
+
+
+
+
+
+https://www.kaggle.com/code/anuragraj03/ppe-detection-using-yolo-helmet-vest-others/notebook

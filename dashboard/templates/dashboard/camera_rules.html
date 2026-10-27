@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Configure rules</title>
+<style>body{margin:2rem;background:#f3f5f7;color:#17202a;font:15px system-ui,sans-serif}main{max-width:800px;margin:auto}section{background:#fff;padding:1rem;border-radius:8px}label{display:block;margin:.7rem 0;font-weight:600}input{display:block;padding:.4rem;margin-top:.25rem}fieldset{margin:1rem 0}button{padding:.5rem 1rem}.error{color:#8d1d00;background:#fee;padding:.7rem}.hint{color:#607080;font-weight:normal}</style></head>
+<body><main><p><a href="{% url 'camera-edit' camera.id %}">Back to camera</a></p><h1>Rules: {{ camera.name }}</h1><section>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}<form method="post">{% csrf_token %}
+<label>Confirm seconds<input type="number" step="0.1" min="0" name="confirm_seconds" value="{{ rules.confirm_seconds }}"></label>
+<label>Clear seconds<input type="number" step="0.1" min="0" name="clear_seconds" value="{{ rules.clear_seconds }}"></label>
+<label>Minimum person height (px)<input type="number" step="1" min="0" name="min_person_height_px" value="{{ rules.min_person_height_px }}"></label>
+<fieldset><legend>Helmet</legend><label><input type="checkbox" name="helmet_enabled" {% if rules.helmet.enabled %}checked{% endif %}> Enabled</label>
+<label>Present classes<input name="helmet_present" value="{{ rules.helmet.present }}"></label><label>Absent classes<input name="helmet_absent" value="{{ rules.helmet.absent }}"></label>
+<label>Region start<input type="number" step="0.01" min="0" max="1" name="helmet_region_start" value="{{ rules.helmet.region_start }}"></label><label>Region end<input type="number" step="0.01" min="0" max="1" name="helmet_region_end" value="{{ rules.helmet.region_end }}"></label></fieldset>
+<fieldset><legend>Vest</legend><label><input type="checkbox" name="vest_enabled" {% if rules.vest.enabled %}checked{% endif %}> Enabled</label>
+<label>Present classes<input name="vest_present" value="{{ rules.vest.present }}"></label><label>Absent classes<input name="vest_absent" value="{{ rules.vest.absent }}"></label>
+<label>Region start<input type="number" step="0.01" min="0" max="1" name="vest_region_start" value="{{ rules.vest.region_start }}"></label><label>Region end<input type="number" step="0.01" min="0" max="1" name="vest_region_end" value="{{ rules.vest.region_end }}"></label></fieldset>
+<button type="submit">Save rules</button></form></section></main></body></html>
