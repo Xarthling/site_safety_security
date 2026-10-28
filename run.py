@@ -6,7 +6,7 @@ The camera named in config.yaml under `gate:` also gets vehicle classification a
     python run.py --video data/clips/site_a_gate.mp4 --camera-id gate_cam --annotate
     python run.py --labels data/labels.csv --annotate       # every clip listed in labels.csv
     python evaluate.py                                      # then score the latest run
-
+ python run.py --video data/clips/c6.mp4 --annotate
 live.py reuses CameraPipeline, save_event, save_vehicle and the build_* helpers from this file.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ from safety.plates import PlateReader, plate_for_storage
 from safety.preprocess import PreprocessedDetector, PreprocessConfig
 from safety.rules import FrameResult, Rules
 from safety.storage import add_event, add_vehicle, connect, file_hash, start_run
-from safety.tracking import Tracker
+from safety.tracking import make_tracker
 from safety.types import Track
 from safety.vehicles import Finished, VehicleMonitor
 from safety.zones import ZoneSet, zones_for
@@ -118,10 +118,9 @@ class CameraPipeline:
 
     def __init__(self, sample_fps: float, cfg: dict, vehicle_monitor: Optional[VehicleMonitor] = None,
                  zones: Optional[ZoneSet] = None, camera: Optional[CameraConfig] = None):
-        t = cfg["tracking"]
         self.person_class = detector_config(cfg)["person_class"]
         self.ppe_enabled = camera is None or camera.supports_ppe
-        self.tracker = Tracker("person", sample_fps, t["activation_threshold"], t["min_consecutive_frames"])
+        self.tracker = make_tracker("person", sample_fps, cfg, camera.id if camera else "")
         self.rules = Rules.from_config(camera.rules if camera else cfg["rules"])
         self.vehicle_monitor = vehicle_monitor
         self.zones = zones or ZoneSet()
@@ -130,7 +129,7 @@ class CameraPipeline:
         people = [d for d in dets if self.ppe_enabled and d.cls == self.person_class
                   and self.zones.in_range(d.box)]
         ppe = [d for d in dets if self.ppe_enabled and d.cls != self.person_class]
-        tracks = self.tracker.update(people)
+        tracks = self.tracker.update(people, image)
         out = FrameOutput(ppe, tracks, self.rules.update(tracks, ppe, video_time_s))
         if self.vehicle_monitor is not None:
             v = self.vehicle_monitor.process(image, video_time_s)

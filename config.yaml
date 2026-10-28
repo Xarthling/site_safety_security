@@ -5,7 +5,7 @@ paths:
   labels: data/labels.csv
 
 video:
-  target_fps: 5              # frames processed per second of video
+  target_fps: 30              # frames processed per second of video
 
 preprocess:                  # conservative enhancement before model inference
   enabled: true
@@ -13,18 +13,24 @@ preprocess:                  # conservative enhancement before model inference
   clahe_clip: 1.5            # local contrast; 0 disables CLAHE
   clahe_grid: 8
   sharpen_amount: 0.35       # mild unsharp mask; 0 disables sharpening
-  upscale: 1.0               # set to 1.5 only after measuring speed and recall
+  upscale: 1.5               # set to 1.5 only after measuring speed and recall
 
 detector:                    # layer 2: select a PPE model profile
-  active_model: ppe
+  active_model: m3
   models:
-    yolo11m_ppe:
+    m1:
       weights: weights/yolo11m-best.pt
       conf: 0.25             # minimum detection confidence
       imgsz: 960             # larger helps small helmets on CCTV, costs compute
       person_class: Person
       classes: [Person, Hardhat, Safety-Vest, NO-Hardhat, NO-Safety-Vest]
-    ppe:
+    m2:
+      weights: weights/chv_y11.pt
+      conf: 0.25             # minimum detection confidence
+      imgsz: 960             # larger helps small helmets on CCTV, costs compute
+      person_class: Person
+      classes: [Person, Hardhat, Safety-Vest, NO-Hardhat, NO-Safety-Vest]
+    m3:
         weights: weights/ppe.pt
         conf: 0.25             # minimum detection confidence
         imgsz: 960             # larger helps small helmets on CCTV, costs compute
@@ -39,10 +45,50 @@ detector:                    # layer 2: select a PPE model profile
             present: [vest]
             absent: [no-vest]
             region: [0.15, 0.75]
+    m4:
+      weights: weights/best.pt
+      conf: 0.25             # minimum detection confidence
+      imgsz: 960             # larger helps small helmets on CCTV, costs compute
+      person_class: Person
+      classes: [Person, Helmet, Vest]
+    m5:
+      weights: weights/yolo26m.pt
+      conf: 0.25             # minimum detection confidence
+      imgsz: 960             # larger helps small helmets on CCTV, costs compute
+      person_class: Person
+      classes: [Person, Helmet, Vest]
+      rules:
+          helmet:
+            present: [helmet]
+            absent: [no-helmet]
+            region: [0.0, 0.40]
+          vest:
+            present: [vest]
+            absent: [no-vest]
+            region: [0.15, 0.75]
+    m6:
+        weights: weights/CHV_6C_y26m.pt
+        conf: 0.25             # minimum detection confidence
+        imgsz: 960             # larger helps small helmets on CCTV, costs compute
+        person_class: Person
+        classes: [Person, Helmet, Vest, NO-Hardhat, NO-Safety-Vest]
+        rules:
+          helmet:
+            present: [Helmet]
+            absent: [NO-Hardhat]
+            region: [0.0, 0.40]
+          vest:
+            present: [Vest]
+            absent: [NO-Safety-Vest]
+            region: [0.15, 0.75]
 
 tracking:                    # layer 3
+  method: botsort             # bytetrack or botsort
   activation_threshold: 0.4  # detections below this cannot start a new track
   min_consecutive_frames: 2  # frames an object must be seen before it gets an ID
+  lost_seconds: 2.0          # how long BoT-SORT keeps an unmatched track alive
+  botsort:
+    gmc_method: sparseOptFlow # camera motion compensation
 
 # Zoning layer: per-camera zones. Polygons are fractions of the frame, [x, y] from 0 to 1.
 # Draw them with:  python define_zone.py --video data/clips/<clip>.mp4
@@ -52,13 +98,12 @@ cameras:
     name: Main gate
     enabled: true
     capabilities: [ppe, vehicles, licence_plates]
-    gate_zone: [[0.064, 0.529], [0.173, 0.918], [0.271, 0.915], [0.129, 0.537]]
-    detection_zone: [[0.106, 0.512], [0.412, 0.906], [0.995, 0.906], [0.993, 0.493]]
+
   site_cam:
     name: Main site
     enabled: true
     capabilities: [ppe]
-    detection_zone: [[0.0, 0.3], [1.0, 0.3], [1.0, 1.0], [0.0, 1.0]]
+
 
 # Gate camera: vehicle classification + licence plates, for ONE camera only.
 gate:
@@ -79,9 +124,9 @@ gate:
 
 # Layer 4: rules. Class names must match what the model outputs (run.py prints them).
 rules:
-  confirm_seconds: 3.0       # a violation must last this long before an event
+  confirm_seconds: 1.5       # a violation must last this long before an event
   clear_seconds: 2.0         # no violation for this long ends the episode
-  min_person_height_px: 80   # smaller people are "unknown", never a violation
+  min_person_height_px: 50   # smaller people are "unknown", never a violation
   helmet:                    # remove a section to stop checking that item
     present: [Hardhat]       # classes meaning "worn"
     absent: [NO-Hardhat]     # classes meaning "missing" (leave [] to infer from absence)
