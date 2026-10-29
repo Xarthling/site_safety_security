@@ -16,7 +16,7 @@ preprocess:                  # conservative enhancement before model inference
   upscale: 1.5               # set to 1.5 only after measuring speed and recall
 
 detector:                    # layer 2: select a PPE model profile
-  active_model: m3
+  active_model: m6
   models:
     m1:
       weights: weights/yolo11m-best.pt
